@@ -6,8 +6,8 @@ class GapFollower:
     PREPROCESS_CONV_SIZE = 3
     BEST_POINT_CONV_SIZE = 80
     MAX_LIDAR_DIST = 3000000
-    STRAIGHTS_SPEED = 8.0
-    CORNERS_SPEED = 5.0
+    STRAIGHTS_SPEED = 9.0
+    CORNERS_SPEED = 6.0
     STRAIGHTS_STEERING_ANGLE = np.pi / 18  # 10 degrees
 
     def __init__(self):
@@ -90,7 +90,7 @@ class GapFollower:
             speed = self.CORNERS_SPEED
         else:
             speed = self.STRAIGHTS_SPEED
-        print('Steering angle in degrees: {}'.format((steering_angle / (np.pi / 2)) * 90))
+        # print('Steering angle in degrees: {}'.format((steering_angle / (np.pi / 2)) * 90))
         return speed, steering_angle
 
 
@@ -235,7 +235,7 @@ class DisparityExtender:
         steering_angle = np.clip(lidar_angle, np.radians(-90), np.radians(90))
         return steering_angle
 
-    def _process_lidar(self, ranges):
+    def process_lidar(self, ranges):
         """ Run the disparity extender algorithm!
             Possible improvements: varying the speed based on the
             steering angle or the distance to the farthest point.
@@ -250,6 +250,3 @@ class DisparityExtender:
                                                  len(proc_ranges))
         speed = self.SPEED
         return speed, steering_angle
-
-    def process_observation(self, ranges, ego_odom):
-        return self._process_lidar(ranges)
