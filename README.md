@@ -206,7 +206,7 @@ Move into the [scripts](./scripts) directory and run the submission file:
 
 ```bash
 cd scripts
-sh submit.sh
+./submit.sh
 ```
 
 Follow the instructions displayed by the script.
