@@ -209,7 +209,7 @@ cd scripts
 ./submit.sh
 ```
 
-Follow the instructions displayed by the script.
+Follow the instructions displayed by the script. Your submission is the `challengeproject.tar.gz` file located at the project root. Extract it to make sure that it is not empty.
 
 Once it's finished, check the competition page to see how you did! (it may take up to 15 minutes to process your new submission)
 
