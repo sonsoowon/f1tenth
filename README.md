@@ -200,7 +200,7 @@ You should see your agent start driving along the track.
 
 ## Submitting
 
-Requirements for running the submission script: 
+Add all your code and other files to be submitted to git. Submission script submits only the files in the repository.
 
 Move into the [scripts](./scripts) directory and run the submission file:
 
