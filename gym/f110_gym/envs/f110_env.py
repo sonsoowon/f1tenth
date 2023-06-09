@@ -656,23 +656,48 @@ class F110Env(gym.Env, utils.EzPickle):
         self.pre_lap_counts = list(self.lap_counts)
 
         self.current_obs = obs
+
+        lidar = obs['scans'][0]
+        vel = obs['linear_vels_x'][0]
+
         # times
         reward = 1000 * self.timestep
-        if np.argmin(obs['scans'][0]) >= 300 and np.argmin(obs['scans'][0]) <= 780:
+        if 300 <= np.argmin(lidar) <= 780:
             reward -= 1
-        elif np.argmin(obs['scans'][0]) < 300 or np.argmin(obs['scans'][0]) > 780:
+        elif np.argmin(lidar) < 300 or np.argmin(lidar) > 780:
             reward += 2
         if min(obs['scans'][0]) < 0.5:
             reward -= 5
 
-        '''for i, goal in enumerate(goals):
+        '''
+            1. 속도 obs['linear_vels_x'] 에 비례하는 reward 부여
+        '''
+        reward += vel // 2
+
+        '''
+            2. 오른쪽 벽에서 일정 거리를 유지하면 reward 부여
+            오차 범위만큼 reward를 감소시칸다
+        '''
+
+        '''
+            3. TTC < threshold 일 경우 reward 감소
+            laser_models.py의 check_ttc_jit 참고
+        '''
+        side_distances, scan_angles, cosines = \
+            self.sim.agents[0].side_distances, self.sim.agents[0].scan_angles, self.sim.agents[0].cosines
+
+        ttc = (lidar - side_distances) / (vel * cosines + 1e-8)
+        danger_ttc = ttc[(0 < ttc) & (ttc < 0.03)]
+        if len(danger_ttc) > 0:
+            reward -= 2
+
+        for i, goal in enumerate(goals):
             if self.checklist[i] == 1:
                 continue
-            if obs['poses_x'][0] > goal[0] - 0.5 and obs['poses_x'][0] < goal[0] + 0.5 and obs['poses_y'][0] > goal[
-                1] - 0.5 and obs['poses_y'][0] < goal[1] + 0.5:
-                print('goal pass')
+            if goal[0] - 0.5 < obs['poses_x'][0] < goal[0] + 0.5 and goal[1] - 0.5 < obs['poses_y'][0] < goal[1] + 0.5:
+                print('goal pass', i)
                 self.checklist[i] = 1
-                reward += 5'''
+                reward += 5 * (i + 1)
 
         self.current_time = self.current_time + self.timestep
 
@@ -683,7 +708,7 @@ class F110Env(gym.Env, utils.EzPickle):
         done, toggle_list = self._check_done()
         info = {'checkpoint_done': toggle_list}
         if self.collisions[self.ego_idx]:
-            reward = 0
+            reward -= 20
         if self.lap_counts[0] != self.pre_lap_counts[0]:
             self.checklist = np.zeros((15))
 
