@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from buffer import ReplayBuffer
 from torch.distributions import Normal
 
-from utils import make_env, save_model, Tracker
+from utils import make_env, save_model, save_graph, Tracker
 from core import mlp, preprocess_lidar
 from config import ac_config, exp_config
 
@@ -204,7 +204,8 @@ if __name__ == "__main__":
     map_name = "map_easy3"
     tracker = Tracker(map_name)
     train(map_name, tracker, ac_config, exp_config)
+    save_graph(tracker, map_name, mode='train')
 
     param_path = "./checkpoints/map_easy3/ActorCritic-1000.pt"
     test(map_name, tracker, ac_config, exp_config, param_path)
-
+    save_graph(tracker, map_name, mode='test')
