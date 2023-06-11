@@ -4,15 +4,6 @@ import scipy.signal
 import collections
 import random
 
-def statistics_scalar(x):
-    x = np.array(x)
-    mean = np.sum(x) / len(x)
-
-    sum_sq = np.sum((x - mean) ** 2)
-    std = np.sqrt(sum_sq / len(x))
-
-    return mean, std
-
 
 def discount_cumsum(x, discount):
     return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
@@ -23,51 +14,33 @@ class PPOBuffer:
     A buffer for storing trajectories experienced by a PPO agent interacting with the environment
     """
 
-    def __init__(self, lidar_dim, act_dim, size, gamma=0.99, lam=0.95):
-        self.lidar_buf = np.zeros((size, lidar_dim), dtype=np.float32)
-        self.act_buf = np.zeros((size, act_dim), dtype=np.float32)
-        self.adv_buf = np.zeros(size, dtype=np.float32)
-        self.rew_buf = np.zeros(size, dtype=np.float32)
-        self.ret_buf = np.zeros(size, dtype=np.float32)
-        self.val_buf = np.zeros(size, dtype=np.float32)
-        self.logp_buf = np.zeros(size, dtype=np.float32)
-        self.gamma, self.lam = gamma, lam
-        self.ptr, self.path_start_idx, self.max_size = 0, 0, size
+    def __init__(self, size, num_envs, device, dim_info, gamma=0.99, lam=0.95):
+        self.lidar_dim, self.action_dim = dim_info.lidar_dim, dim_info.action_dim
+        self.device = device
 
-    def store(self, lidar, act, rew, val, logp):
+        self.lidars = torch.zeros((size, num_envs) + (self.lidar_dim,)).to(device)
+        self.actions = torch.zeros((size, num_envs) + (self.action_dim,)).to(device)
+        self.logprobs = torch.zeros((size, num_envs)).to(device)
+        self.rewards = torch.zeros((size, num_envs)).to(device)
+        self.dones = torch.zeros((size, num_envs)).to(device)
+        self.values = torch.zeros((size, num_envs)).to(device)
+        self.advantages = torch.zeros((size, num_envs)).to(device)
+        self.returns = torch.zeros((size, num_envs)).to(device)
+        self.gamma, self.lam = gamma, lam
+        self.ptr, self.max_size = 0, size
+
+    def store(self, lidar, act, rew, val, logp, done):
         """
         Append one timestep of agent-environment interaction to the buffer.
         """
-        assert self.ptr < self.max_size  # buffer has to have room so you can store
-        self.lidar_buf[self.ptr] = lidar
-        self.act_buf[self.ptr] = act
-        self.rew_buf[self.ptr] = rew
-        self.val_buf[self.ptr] = val
-        self.logp_buf[self.ptr] = logp
+        # assert self.ptr < self.max_size  # buffer has to have room so you can store
+        self.lidars[self.ptr] = lidar
+        self.actions[self.ptr] = act
+        self.rewards[self.ptr] = rew
+        self.values[self.ptr] = val
+        self.logprobs[self.ptr] = logp
+        self.dones[self.ptr] = done
         self.ptr += 1
-
-    def finish_path(self, last_val=0):
-        """
-        Call this at the end of a trajectory, or when one gets cut off by an epoch ending.
-
-        last_val
-            - 정상적으로 episode를 마쳤을 경우 0
-            - terminal state에 도달하기 전인 경우 V(s_t) : trajectory가 종료한 시점인 last state의 value 추정값
-
-        """
-
-        path_slice = slice(self.path_start_idx, self.ptr)
-        rews = np.append(self.rew_buf[path_slice], last_val)
-        vals = np.append(self.val_buf[path_slice], last_val)
-
-        # the next two lines implement GAE-Lambda advantage calculation
-        deltas = rews[:-1] + self.gamma * vals[1:] - vals[:-1]
-        self.adv_buf[path_slice] = discount_cumsum(deltas, self.gamma * self.lam)
-
-        # the next line computes rewards-to-go, to be targets for the value function
-        self.ret_buf[path_slice] = discount_cumsum(rews, self.gamma)[:-1]
-
-        self.path_start_idx = self.ptr
 
     def get(self):
         """
@@ -75,13 +48,25 @@ class PPOBuffer:
         Also, resets some pointers in the buffer.
         """
         assert self.ptr == self.max_size  # buffer has to be full before you can get
-        self.ptr, self.path_start_idx = 0, 0
-        # the next two lines implement the advantage normalization trick
-        adv_mean, adv_std = statistics_scalar(self.adv_buf)
-        self.adv_buf = (self.adv_buf - adv_mean) / adv_std
-        data = dict(lidar=self.lidar_buf, act=self.act_buf, ret=self.ret_buf,
-                    adv=self.adv_buf, logp=self.logp_buf)
-        return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in data.items()}
+        self.ptr = 0
+
+        return dict(
+            lidars=self.lidars.reshape((-1,) + (self.lidar_dim,)),
+            actions=self.actions.reshape((-1,) + (self.action_dim,)),
+            values=self.values.reshape(-1),
+            returns=self.returns.reshape(-1),
+            advantages=self.advantages.reshape(-1),
+            logprobs=self.logprobs.reshape(-1),
+            rewards=self.rewards.reshape(-1),
+            dones=self.dones.reshape(-1)
+        )
+
+    def calculate_adv_ret(self, last_value):
+        next_values = torch.cat([self.values, last_value], dim=0)
+        deltas = self.rewards + self.gamma * next_values[1:] * self.dones - self.values
+        advantages = np.transpose([discount_cumsum(delta.numpy(), self.gamma * self.lam) for delta in torch.transpose(deltas, 0, 1)])
+        self.advantages = torch.Tensor(advantages).to(self.device)
+        self.returns = self.advantages + self.values
 
 
 # replay buffer

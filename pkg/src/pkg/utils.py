@@ -9,8 +9,6 @@ import numpy as np
 
 from torch.utils.tensorboard import SummaryWriter
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
-import seaborn as sns
 
 @dataclass
 class GlobalLogger:
@@ -22,43 +20,60 @@ class GlobalLogger:
     test_episodic_time: List
     policy_loss: List
     value_loss: List
+    entropy_loss: List
 
-class Tracker:
-    def __init__(self, map_name):
-        log_path = str(Path("./runs") / Path(map_name))
-        self.global_logger = GlobalLogger(
-            total_steps=[],
-            episodic_return_steps=[],
-            train_episodic_return=[],
-            train_episodic_time=[],
-            test_episodic_return=[],
-            test_episodic_time=[],
-            policy_loss=[],
-            value_loss=[]
-        )
-        self.global_logger.log_path = log_path
-        self.writer = SummaryWriter(log_path)
+def get_tracker(map_name):
+    log_path = str(Path("./runs") / Path(map_name))
+    global_logger = GlobalLogger(
+        total_steps=[],
+        episodic_return_steps=[],
+        train_episodic_return=[],
+        train_episodic_time=[],
+        test_episodic_return=[],
+        test_episodic_time=[],
+        policy_loss=[],
+        value_loss=[],
+        entropy_loss=[]
+    )
+    global_logger.log_path = log_path
+    return global_logger, SummaryWriter(log_path)
 
-    def record_train(self, total_step, epi_info=None, losses=None):
-        if epi_info is not None:
-            epi_return, epi_time, epi_len = epi_info['epi_return'], epi_info['epi_time'], epi_info['epi_len']
-            self.writer.add_scalar("charts/episodic_return", epi_return, total_step)
-            self.writer.add_scalar("charts/episodic_time", epi_time, total_step)
-            self.writer.add_scalar("charts/episodic_length", epi_len, total_step)
-            self.global_logger.train_episodic_return.append(epi_return)
-            self.global_logger.train_episodic_time.append(epi_time)
-            self.global_logger.episodic_return_steps.append(epi_len)
 
-        if losses is not None:
-            value_loss, policy_loss = losses['v_loss'], losses['pg_loss']
-            self.writer.add_scalar("losses/value_loss", value_loss.item(), total_step)
-            self.writer.add_scalar("losses/policy_loss", policy_loss.item(), total_step)
-            self.global_logger.value_loss.append(value_loss.item())
-            self.global_logger.policy_loss.append(policy_loss.item())
+class VectorEnv:
+    def __init__(self, config, n):
+        self.envs = tuple(make_env(config.map_name) for _ in range(n))
+        self.poses = np.array(config.poses)
 
-    def record_test(self, epi_return, epi_time):
-        self.global_logger.test_episodic_return.append(epi_return)
-        self.global_logger.test_episodic_time.append(epi_time)
+    # Call this only once at the beginning of training:
+    def reset(self):
+        # obs, reward, done, _
+        return tuple(np.transpose([env.reset(poses=self.poses) for env in self.envs]))
+
+    # Call this on every timestep:
+    def step(self, actions):
+        assert len(self.envs) == len(actions)
+        return_values = []
+        for env, a in zip(self.envs, actions):
+            observation, reward, done, info = env.step(np.expand_dims(a, axis=0))
+            if done:
+                observation, _, _, _ = env.reset(poses=self.poses)
+            return_values.append([observation, reward, done, info])
+        return tuple(np.transpose(return_values))
+
+    def render(self):
+        self.envs[0].render(mode='human_fast')
+    # Call this at the end of training:
+    def close(self):
+        for env in self.envs:
+            env.close()
+
+def make_env(map_name):
+    current_dir = os.path.abspath(os.path.dirname(__file__))
+    sys.path.append(current_dir)
+
+    return gym.make('f110_gym:f110-v0',
+                    map="{}/maps/{}".format(current_dir, map_name),
+                    map_ext=".png", num_agents=1)
 
 def save_model(map_name, actor_critic, update, fast=False):
     ckpt_path = Path("./checkpoints") / Path(map_name)
@@ -70,17 +85,7 @@ def save_model(map_name, actor_critic, update, fast=False):
     print(f"model saved to {model_path}")
 
 
-def make_env(race_track):
-    current_dir = os.path.abspath(os.path.dirname(__file__))
-    sys.path.append(current_dir)
-
-    return gym.make('f110_gym:f110-v0',
-                    map="{}/maps/{}".format(current_dir, race_track),
-                    map_ext=".png", num_agents=1)
-
-
-def save_graph(tracker, map_name, mode='train'):
-    global_logger = tracker.global_logger
+def save_graph(global_logger, map_name, mode='train'):
     x = np.array(global_logger.episodic_return_steps)
     epi_return = np.array(global_logger.train_episodic_return).squeeze(1)
     epi_time = np.array(global_logger.train_episodic_time).squeeze(1)
