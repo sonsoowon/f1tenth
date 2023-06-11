@@ -654,10 +654,11 @@ class F110Env(gym.Env, utils.EzPickle):
         obs['lap_times'] = self.lap_times
         obs['lap_counts'] = self.lap_counts
         self.pre_lap_counts = list(self.lap_counts)
-
         self.current_obs = obs
 
         lidar = obs['scans'][0]
+        proc_ranges = np.convolve(np.array(lidar[135:-135:2]), np.ones(3), 'same') / 3
+        proc_ranges = np.clip(proc_ranges, 0, 3000000)
         vel = obs['linear_vels_x'][0]
 
         # times
@@ -672,7 +673,6 @@ class F110Env(gym.Env, utils.EzPickle):
         '''
             1. 속도 obs['linear_vels_x'] 에 비례하는 reward 부여
         '''
-        reward += vel // 2
 
         '''
             2. 오른쪽 벽에서 일정 거리를 유지하면 reward 부여
@@ -686,10 +686,12 @@ class F110Env(gym.Env, utils.EzPickle):
         side_distances, scan_angles, cosines = \
             self.sim.agents[0].side_distances, self.sim.agents[0].scan_angles, self.sim.agents[0].cosines
 
-        ttc = (lidar - side_distances) / (vel * cosines + 1e-8)
-        danger_ttc = ttc[(0 < ttc) & (ttc < 0.03)]
-        if len(danger_ttc) > 0:
-            reward -= 2
+        ttc = (proc_ranges - side_distances) / (vel * cosines + 1e-8)
+        ttc_min = np.min(ttc)
+        if ttc_min > 1:
+            reward += vel
+        else:
+            reward += -round(1/(np.min(ttc) + 1e-6), 2) * vel
 
         for i, goal in enumerate(goals):
             if self.checklist[i] == 1:
